@@ -22,7 +22,7 @@ NRP  : 5027231015
 
 1. Kafka, Zookeeper, dan Spark set up
 
-![alt text](/apache-kafka-big-data/image/image.png)
+![alt text](/apache-kafka-big-data/image/image-set%20up.png)
 
 menjalankan container dockernya yang dibutuhkan yaitu kafka, spark, dan zookeeper
 
