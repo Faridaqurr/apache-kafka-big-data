@@ -14,61 +14,64 @@ spark = SparkSession.builder \
 
 spark.sparkContext.setLogLevel("ERROR")
 
-# Definisi schema
-schema_suhu = StructType() \
-    .add("gudang_id", StringType()) \
-    .add("suhu", IntegerType())
+# Schema
+schema_suhu = StructType().add("gudang_id", StringType()).add("suhu", IntegerType())
+schema_kelembaban = StructType().add("gudang_id", StringType()).add("kelembaban", IntegerType())
 
-schema_kelembaban = StructType() \
-    .add("gudang_id", StringType()) \
-    .add("kelembaban", IntegerType())
-
-# Stream data suhu
-df_suhu_raw = spark.readStream \
-    .format("kafka") \
+# ===== STREAM SUHU =====
+df_suhu_raw = spark.readStream.format("kafka") \
     .option("kafka.bootstrap.servers", "kafka:9092") \
     .option("subscribe", "sensor-suhu-gudang") \
     .load()
 
-df_suhu = df_suhu_raw \
-    .selectExpr("CAST(value AS STRING)", "timestamp") \
+df_suhu = df_suhu_raw.selectExpr("CAST(value AS STRING)", "timestamp") \
     .select(from_json(col("value"), schema_suhu).alias("data"), col("timestamp")) \
     .select("data.*", "timestamp") \
     .withWatermark("timestamp", "10 seconds")
 
-# Stream data kelembaban
-df_kelembaban_raw = spark.readStream \
-    .format("kafka") \
+# ===== STREAM KELEMBABAN =====
+df_kelembaban_raw = spark.readStream.format("kafka") \
     .option("kafka.bootstrap.servers", "kafka:9092") \
     .option("subscribe", "sensor-kelembaban-gudang") \
     .load()
 
-df_kelembaban = df_kelembaban_raw \
-    .selectExpr("CAST(value AS STRING)", "timestamp") \
+df_kelembaban = df_kelembaban_raw.selectExpr("CAST(value AS STRING)", "timestamp") \
     .select(from_json(col("value"), schema_kelembaban).alias("data"), col("timestamp")) \
     .select("data.*", "timestamp") \
     .withWatermark("timestamp", "10 seconds")
 
-# Buat window 5 detik dan agregasi max suhu per gudang_id dan window waktu
-df_suhu_windowed = df_suhu.groupBy(
-    col("gudang_id"),
-    window(col("timestamp"), "5 seconds")
-).agg(expr("max(suhu) as suhu"))
-
-# Buat window 5 detik dan agregasi max kelembaban per gudang_id dan window waktu
-df_kelembaban_windowed = df_kelembaban.groupBy(
-    col("gudang_id"),
-    window(col("timestamp"), "5 seconds")
-).agg(expr("max(kelembaban) as kelembaban"))
-
-# Join berdasarkan gudang_id dan window
-joined = df_suhu_windowed.join(
-    df_kelembaban_windowed,
-    on=["gudang_id", "window"]
+# ===== PERINGATAN INDIVIDUAL =====
+peringatan_suhu = df_suhu.filter("suhu > 80").selectExpr(
+    "'[Peringatan Suhu Tinggi]' as jenis", "gudang_id", "concat('Suhu ', suhu, '°C') as detail"
 )
 
-# Tambahkan kolom status
-alert = joined.withColumn(
+peringatan_kelembaban = df_kelembaban.filter("kelembaban > 70").selectExpr(
+    "'[Peringatan Kelembaban Tinggi]' as jenis", "gudang_id", "concat('Kelembaban ', kelembaban, '%') as detail"
+)
+
+peringatan_union = peringatan_suhu.union(peringatan_kelembaban)
+
+peringatan_query = peringatan_union.writeStream \
+    .outputMode("append") \
+    .format("console") \
+    .option("truncate", False) \
+    .option("numRows", 100) \
+    .start()
+
+# ===== JOIN DAN GABUNGKAN (WINDOW 10s) =====
+df_suhu_window = df_suhu.groupBy(
+    col("gudang_id"),
+    window(col("timestamp"), "10 seconds")
+).agg(expr("max(suhu) as suhu"))
+
+df_kelembaban_window = df_kelembaban.groupBy(
+    col("gudang_id"),
+    window(col("timestamp"), "10 seconds")
+).agg(expr("max(kelembaban) as kelembaban"))
+
+gabung = df_suhu_window.join(df_kelembaban_window, ["gudang_id", "window"])
+
+alert_gabungan = gabung.withColumn(
     "status", expr("""
         CASE
             WHEN suhu > 80 AND kelembaban > 70 THEN 'Bahaya tinggi! Barang berisiko rusak'
@@ -79,21 +82,23 @@ alert = joined.withColumn(
     """)
 )
 
-# Pilih kolom untuk output supaya lebih rapi
-output = alert.select(
+output_gabungan = alert_gabungan.selectExpr(
+    "'[HASIL GABUNGAN]' as jenis",
     "gudang_id",
-    "suhu",
-    "kelembaban",
-    "window.start",
-    "window.end",
-    "status"
+    "concat('Suhu: ', suhu, '°C') as suhu",
+    "concat('Kelembaban: ', kelembaban, '%') as kelembaban",
+    "status",
+    "window.start as waktu_mulai",
+    "window.end as waktu_selesai"
 )
 
-# Tampilkan hasil ke console
-query = output.writeStream \
+gabungan_query = output_gabungan.writeStream \
     .outputMode("append") \
     .format("console") \
     .option("truncate", False) \
+    .option("numRows", 100) \
     .start()
 
-query.awaitTermination()
+# Tunggu kedua stream selesai
+peringatan_query.awaitTermination()
+gabungan_query.awaitTermination()
