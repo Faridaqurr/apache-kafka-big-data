@@ -16,15 +16,21 @@ NRP  : 5027231015
 
 ### Struktur folder projeknya :
 
-![alt text](/apache-kafka-big-data/image/image-direktori.png)
+![alt text](image/image-direktori.png)
 
 ### Langkah Pengerjaan
 
 1. Kafka, Zookeeper, dan Spark set up
 
-![alt text](/apache-kafka-big-data/image/image-set%20up.png)
+  ![alt text](image/image-set-up.png)
+  
+menjalankan container dockernya yang dibutuhkan yaitu :
 
-menjalankan container dockernya yang dibutuhkan yaitu kafka, spark, dan zookeeper
+- bigdata-spark-master-1: Container untuk Spark Master, mengatur distribusi tugas ke worker.
+- bigdata-zookeeper-1: Container untuk Zookeeper, koordinasi antar komponen Kafka.
+- bigdata-spark-worker-1-1: Container untuk Spark Worker, menjalankan proses data.
+- bigdata-kafka-1: Container untuk Kafka Broker, mengelola dan mengalirkan data topik.
+- producer: Container untuk menjalankan Python producer, yang mengirim data sensor suhu dan kelembaban ke Kafka.
 
 2. Buat topik broker
 - Masuk ke container Kafka
@@ -47,11 +53,11 @@ python producer_kelembapan.py
 ```
 hasil producer suhu :
 
-![alt text](/apache-kafka-big-data/image/image-suhu.png)
+![alt text](image/image-suhu.png)
 
 hasil produser kelembaban :
 
-![alt text](/apache-kafka-big-data/image/image-kelembaban.png)
+![alt text](image/image-kelembaban.png)
 
 4. Konsumsi data dari kedua topik dan digabungkan
 - masuk ke container spark untuk customernya
@@ -70,4 +76,4 @@ docker exec -it bigdata-spark-master-1 bash
 ```
 menggunakan command sepanjang ini karena --jars dan --conf konektor spark nya gabisa kehubung otomatis jadinya pakai manual untuk jalaninnya
 
-![alt text](/apache-kafka-big-data/image/image-consumerr.png)
+![alt text](image/image-consumerr.png)
